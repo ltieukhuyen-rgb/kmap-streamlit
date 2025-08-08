@@ -1,13 +1,31 @@
 import streamlit as st
 import matplotlib.pyplot as plt
-import itertools
-import random
 
-# Hàm chuyển số sang mã Gray
+# ====== Hàm hỗ trợ ======
 def gray_code(n):
     return n ^ (n >> 1)
 
-# Thuật toán Quine–McCluskey đơn giản
+def num_to_binary_list(num, bits):
+    return [(num >> i) & 1 for i in reversed(range(bits))]
+
+def term_to_mask(group, num_vars):
+    bits = num_to_binary_list(list(group)[0], num_vars)
+    for other in group[1:]:
+        bits2 = num_to_binary_list(other, num_vars)
+        bits = ['-' if b1 != b2 else b1 for b1, b2 in zip(bits, bits2)]
+    return bits
+
+def term_to_expression(bits):
+    variables = [chr(ord('A')+i) for i in range(len(bits))]
+    expr_parts = []
+    for bit, var in zip(bits, variables):
+        if bit == '1':
+            expr_parts.append(var)
+        elif bit == '0':
+            expr_parts.append(f"{var}'")
+    return ''.join(expr_parts) if expr_parts else '1'
+
+# ====== Quine–McCluskey tối giản ======
 def qm_minimize(minterms, dont_cares, num_vars):
     terms = sorted(set(minterms) | set(dont_cares))
     groups = {}
@@ -44,8 +62,8 @@ def qm_minimize(minterms, dont_cares, num_vars):
             essential.add(covers[0])
     return list(essential)
 
-# Vẽ K-map với nhóm tô màu nền
-def draw_kmap(num_vars, minterms, groups):
+# ====== Vẽ K-map ======
+def draw_kmap(num_vars, minterms, groups, colors):
     if num_vars <= 3:
         rows = 1 << (num_vars // 2)
         cols = 1 << (num_vars - num_vars // 2)
@@ -60,7 +78,6 @@ def draw_kmap(num_vars, minterms, groups):
     ax.set_yticklabels([])
     ax.grid(True)
 
-    # Map giá trị vào ô K-map
     cell_map = {}
     for r in range(rows):
         for c in range(cols):
@@ -71,8 +88,6 @@ def draw_kmap(num_vars, minterms, groups):
             if val in minterms:
                 ax.text(c+0.5, r+0.5, '1', va='center', ha='center', fontsize=14)
 
-    # Tô màu nhóm
-    colors = ['#ffcccc','#ccffcc','#ccccff','#ffffcc','#ccffff','#ffccff']
     for g_idx, group in enumerate(groups):
         color = colors[g_idx % len(colors)]
         for cell, val in cell_map.items():
@@ -82,7 +97,7 @@ def draw_kmap(num_vars, minterms, groups):
     ax.invert_yaxis()
     return fig
 
-# ============================
+# ============================ Streamlit ============================
 st.title("K-map Minimizer 2–6 biến")
 
 num_vars = st.slider("Số biến", 2, 6, 3)
@@ -97,7 +112,31 @@ except:
     st.stop()
 
 if st.button("Tối giản và Vẽ K-map"):
+    # Hiển thị dữ liệu đầu vào
+    st.subheader("Dữ liệu đầu vào")
+    st.write(f"Số biến: **{num_vars}**")
+    st.write(f"Minterms: {minterms}")
+    st.write(f"Don't cares: {dont_cares}")
+
+    # Tối giản
     groups = qm_minimize(minterms, dont_cares, num_vars)
-    st.write("Nhóm tối giản:", groups)
-    fig = draw_kmap(num_vars, minterms, groups)
+
+    # Màu cho nhóm
+    colors = ['#ffcccc','#ccffcc','#ccccff','#ffffcc','#ccffff','#ffccff']
+
+    # Hiển thị nhóm
+    st.subheader("Các nhóm tối giản")
+    for idx, g in enumerate(groups, 1):
+        mask = term_to_mask(g, num_vars)
+        expr = term_to_expression(mask)
+        st.markdown(
+            f"<div style='background-color:{colors[idx%len(colors)]};padding:5px;'>"
+            f"**Nhóm {idx}:** {sorted(g)} | Mask: {''.join(mask)} | Biểu thức: {expr}"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+
+    # Vẽ K-map
+    st.subheader("K-map")
+    fig = draw_kmap(num_vars, minterms, groups, colors)
     st.pyplot(fig)
