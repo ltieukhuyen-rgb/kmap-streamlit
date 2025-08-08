@@ -125,22 +125,30 @@ if st.button("Tối giản và Vẽ K-map"):
     colors = ['#ffcccc','#ccffcc','#ccccff','#ffffcc','#ccffff','#ffccff']
 
     # Hiển thị nhóm
-    # Hiển thị nhóm
-st.subheader("Các nhóm tối giản")
-for idx, g in enumerate(groups, 1):
-    mask = term_to_mask(g, num_vars)
-    mask_str = ''.join(mask)
-    expr = term_to_expression(mask)
-    st.markdown(
-        f"<div style='background-color:{colors[idx%len(colors)]};padding:5px;'>"
-        f"<b>Nhóm {idx}:</b> {sorted(g)} | Mask: {mask_str} | Biểu thức: {expr}"
-        f"</div>",
-        unsafe_allow_html=True
-    )
+    st.subheader("Các nhóm tối giản")
+    expr_list = []
+    for idx, g in enumerate(groups, 1):
+        mask = term_to_mask(g, num_vars)
+        mask_str = ''.join(mask)
+        expr = term_to_expression(mask)
+        expr_list.append(expr)
 
+        st.markdown(
+            f"<div style='background-color:{colors[idx % len(colors)]};padding:5px;'>"
+            f"<b>Nhóm {idx}:</b> {sorted(g)} "
+            f"| Mask: <code>{mask_str}</code> "
+            f"| Biểu thức: <b>{expr}</b>"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+
+    # Hiển thị biểu thức tối giản dạng SOP
+    if expr_list:
+        st.subheader("Biểu thức tối giản (SOP)")
+        sop_str = " + ".join(expr_list)
+        st.latex(sop_str)
 
     # Vẽ K-map
     st.subheader("K-map")
     fig = draw_kmap(num_vars, minterms, groups, colors)
     st.pyplot(fig)
-
