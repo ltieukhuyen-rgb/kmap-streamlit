@@ -188,9 +188,15 @@ def solve_minimization(minterms, dont_cares, num_vars):
     }
 
 # ---------------- K-map drawing ----------------
-def draw_kmap(num_vars, minterms, selected_groups, colors):
+def draw_kmap(num_vars, minterms, dont_cares, selected_groups, colors):
+    # xác định số hàng, cột
     rows = 1 << (num_vars // 2)
     cols = 1 << (num_vars - num_vars // 2)
+
+    # danh sách Gray code cho hàng và cột
+    row_gray_list = [gray_code(i) for i in range(rows)]
+    col_gray_list = [gray_code(i) for i in range(cols)]
+
     fig, ax = plt.subplots(figsize=(cols * 0.9, rows * 0.9))
     ax.set_xticks(range(cols + 1))
     ax.set_yticks(range(rows + 1))
@@ -198,17 +204,21 @@ def draw_kmap(num_vars, minterms, selected_groups, colors):
     ax.set_yticklabels([])
     ax.grid(True, linewidth=0.6)
 
+    # map từ tọa độ -> minterm đúng thứ tự
     cell_map = {}
     for r in range(rows):
         for c in range(cols):
-            row_gray = gray_code(r)
-            col_gray = gray_code(c)
-            val = (row_gray << (num_vars - num_vars // 2)) | col_gray
+            row_bits = row_gray_list[r]
+            col_bits = col_gray_list[c]
+            # hàng = MSB, cột = LSB
+            val = (row_bits << (num_vars - num_vars // 2)) | col_bits
             cell_map[(r, c)] = val
             if val in minterms:
                 ax.text(c + 0.5, r + 0.5, '1', va='center', ha='center', fontsize=12)
+            elif val in dont_cares:
+                ax.text(c + 0.5, r + 0.5, 'X', va='center', ha='center', fontsize=12, color='blue')
 
-    # paint selected groups with colors (if overlapping, last group paints)
+    # Tô màu nhóm đã chọn
     for g_idx, grp in enumerate(selected_groups):
         color = colors[g_idx % len(colors)]
         covered = set(grp['covers'])
@@ -220,6 +230,7 @@ def draw_kmap(num_vars, minterms, selected_groups, colors):
     ax.set_aspect('equal')
     plt.tight_layout()
     return fig
+
 
 # ---------------- Streamlit UI ----------------
 st.set_page_config(layout="wide")
@@ -334,3 +345,4 @@ if st.button("Tối giản và Vẽ K-map"):
         st.subheader("K-map (ô có '1' là minterms; màu = implicant đã chọn)")
         fig = draw_kmap(num_vars, minterms, selected_groups, colors)
         st.pyplot(fig)
+
