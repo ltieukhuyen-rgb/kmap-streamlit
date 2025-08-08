@@ -11,7 +11,6 @@ def gray_code(n):
     return n ^ (n >> 1)
 
 def mask_to_expr(mask):
-    """mask: string like '1-0' -> expr 'A C' with primes"""
     vars_ = [chr(ord('A') + i) for i in range(len(mask))]
     parts = []
     for ch, v in zip(mask, vars_):
@@ -26,36 +25,24 @@ def mask_literal_count(mask):
 
 # ---------------- Quine-McCluskey + Petrick ----------------
 def generate_prime_implicants(minterms, dont_cares, num_vars):
-    """
-    Return list of dicts: {'mask': mask_str, 'covers': set_of_ints}
-    """
-    # initial implicants from minterms + don't cares
     all_terms = sorted(set(minterms) | set(dont_cares))
-    implicants = []
-    for t in all_terms:
-        mask = int_to_bin_str(t, num_vars)
-        implicants.append({'mask': mask, 'covers': {t}})
+    implicants = [{'mask': int_to_bin_str(t, num_vars), 'covers': {t}} for t in all_terms]
 
     prime_implicants = []
-    # iterative combining
     while True:
-        # group by count of ones (ignoring '-')
         groups = {}
         for imp in implicants:
             ones = imp['mask'].count('1')
             groups.setdefault(ones, []).append(imp)
 
-        new_map = {}  # mask_str -> covers set
-        combined_flags = set()  # masks that got combined this round
+        new_map = {}
+        combined_flags = set()
 
         group_keys = sorted(groups.keys())
         for i in range(len(group_keys) - 1):
-            g1 = groups[group_keys[i]]
-            g2 = groups[group_keys[i + 1]]
-            for a in g1:
-                for b in g2:
-                    m1 = a['mask']; m2 = b['mask']
-                    # can combine if differ in exactly one position and positions with '-' must match
+            for a in groups[group_keys[i]]:
+                for b in groups[group_keys[i + 1]]:
+                    m1, m2 = a['mask'], b['mask']
                     diffs = 0
                     ok = True
                     for x, y in zip(m1, m2):
@@ -69,131 +56,78 @@ def generate_prime_implicants(minterms, dont_cares, num_vars):
                                 break
                     if not ok or diffs != 1:
                         continue
-                    # combine
                     new_mask = ''.join(x if x == y else '-' for x, y in zip(m1, m2))
                     new_covers = a['covers'] | b['covers']
-                    if new_mask in new_map:
-                        new_map[new_mask] |= new_covers
-                    else:
-                        new_map[new_mask] = set(new_covers)
+                    new_map.setdefault(new_mask, set()).update(new_covers)
                     combined_flags.add(m1)
                     combined_flags.add(m2)
 
-        # add uncombined implicants to prime_implicants
         for imp in implicants:
             if imp['mask'] not in combined_flags:
-                # avoid duplicates by mask
                 exists = next((p for p in prime_implicants if p['mask'] == imp['mask']), None)
                 if exists is None:
                     prime_implicants.append({'mask': imp['mask'], 'covers': set(imp['covers'])})
                 else:
-                    exists['covers'] |= imp['covers']
+                    exists['covers'].update(imp['covers'])
 
-        # prepare next round
         if not new_map:
             break
         implicants = [{'mask': m, 'covers': c} for m, c in new_map.items()]
 
-    # deduplicate prime_implicants masks and unify covers
     uniq = {}
     for p in prime_implicants:
-        if p['mask'] in uniq:
-            uniq[p['mask']] |= p['covers']
-        else:
-            uniq[p['mask']] = set(p['covers'])
-    result = [{'mask': m, 'covers': uniq[m], 'literals': mask_literal_count(m)} for m in sorted(uniq.keys())]
-    return result
+        uniq.setdefault(p['mask'], set()).update(p['covers'])
+    return [{'mask': m, 'covers': uniq[m], 'literals': mask_literal_count(m)} for m in sorted(uniq.keys())]
 
 def petrick_method(chart, prime_info):
-    """
-    chart: dict minterm -> list of prime indices that cover it
-    prime_info: list of prime implicant dicts (for weights)
-    Returns: set of chosen prime indices (optimal by cardinality then literal count)
-    """
-    # Start product as list containing empty set
     product = [frozenset()]
-    # for each minterm, multiply by sum(implicant indices covering that minterm)
-    for m, covers in chart.items():
+    for covers in chart.values():
         if not covers:
-            # impossible cover
             continue
         new_product = set()
         for term in product:
             for idx in covers:
                 new_term = term | {idx}
                 new_product.add(frozenset(new_term))
-        # reduce by removing supersets
-        # convert to list and sort by size then remove supersets
         terms = sorted(new_product, key=lambda s: (len(s), sum(prime_info[i]['literals'] for i in s)))
         reduced = []
         for t in terms:
-            if not any(t > r for r in reduced):  # if t not a strict superset of any already kept
+            if not any(t > r for r in reduced):
                 reduced.append(t)
         product = reduced
 
-    # product is list of frozensets (possible covers). Choose minimal by size then by literals weight.
     if not product:
         return set()
     min_size = min(len(s) for s in product)
     candidates = [s for s in product if len(s) == min_size]
-    # tie-breaker: minimal literal count
-    best = min(candidates, key=lambda s: sum(prime_info[i]['literals'] for i in s))
-    return set(best)
+    return min(candidates, key=lambda s: sum(prime_info[i]['literals'] for i in s))
 
 def solve_minimization(minterms, dont_cares, num_vars):
-    # 1) generate prime implicants
     prime_info = generate_prime_implicants(minterms, dont_cares, num_vars)
-    if not prime_info:
-        return {'prime_info': [], 'selected_idx': set(), 'final_exprs': [], 'essential_idx': set(), 'chart': {}}
+    chart = {m: [idx for idx, p in enumerate(prime_info) if m in p['covers']] for m in minterms}
 
-    # 2) build prime implicant chart only for real minterms (not don't cares)
-    chart = {}
-    for m in minterms:
-        covers = []
-        for idx, p in enumerate(prime_info):
-            if m in p['covers']:
-                covers.append(idx)
-        chart[m] = covers
-
-    # 3) find essential implicants
-    essential_idx = set()
+    essential_idx = {covers[0] for m, covers in chart.items() if len(covers) == 1}
     covered_minterms = set()
-    for m, covers in chart.items():
-        if len(covers) == 1:
-            essential_idx.add(covers[0])
-    # mark covered minterms by essentials
-    for idx in list(essential_idx):
-        covered_minterms |= set(prime_info[idx]['covers']) & set(minterms)
+    for idx in essential_idx:
+        covered_minterms |= (prime_info[idx]['covers'] & set(minterms))
 
-    # 4) remaining minterms
     remaining = [m for m in minterms if m not in covered_minterms]
-
     selected_idx = set(essential_idx)
     if remaining:
-        # build reduced chart for remaining minterms
         reduced_chart = {m: chart[m] for m in remaining}
-        # apply petrick
-        petrick_choice = petrick_method(reduced_chart, prime_info)
-        selected_idx |= set(petrick_choice)
-    # final expressions
-    final_exprs = []
-    for idx in sorted(selected_idx):
-        final_exprs.append({'mask': prime_info[idx]['mask'], 'expr': mask_to_expr(prime_info[idx]['mask']), 'covers': sorted(prime_info[idx]['covers']), 'idx': idx})
-    return {
-        'prime_info': prime_info,
-        'selected_idx': selected_idx,
-        'final_exprs': final_exprs,
-        'essential_idx': essential_idx,
-        'chart': chart
-    }
+        selected_idx |= petrick_method(reduced_chart, prime_info)
+
+    final_exprs = [{'mask': prime_info[idx]['mask'],
+                    'expr': mask_to_expr(prime_info[idx]['mask']),
+                    'covers': sorted(prime_info[idx]['covers']),
+                    'idx': idx}
+                   for idx in sorted(selected_idx)]
+    return prime_info, selected_idx, final_exprs, essential_idx
 
 # ---------------- K-map drawing ----------------
 def draw_kmap(num_vars, minterms, dont_cares, selected_groups, colors):
-    # xác định số hàng, cột
     rows = 1 << (num_vars // 2)
     cols = 1 << (num_vars - num_vars // 2)
-
-    # danh sách Gray code cho hàng và cột
     row_gray_list = [gray_code(i) for i in range(rows)]
     col_gray_list = [gray_code(i) for i in range(cols)]
 
@@ -204,13 +138,11 @@ def draw_kmap(num_vars, minterms, dont_cares, selected_groups, colors):
     ax.set_yticklabels([])
     ax.grid(True, linewidth=0.6)
 
-    # map từ tọa độ -> minterm đúng thứ tự
     cell_map = {}
     for r in range(rows):
         for c in range(cols):
             row_bits = row_gray_list[r]
             col_bits = col_gray_list[c]
-            # hàng = MSB, cột = LSB
             val = (row_bits << (num_vars - num_vars // 2)) | col_bits
             cell_map[(r, c)] = val
             if val in minterms:
@@ -218,7 +150,6 @@ def draw_kmap(num_vars, minterms, dont_cares, selected_groups, colors):
             elif val in dont_cares:
                 ax.text(c + 0.5, r + 0.5, 'X', va='center', ha='center', fontsize=12, color='blue')
 
-    # Tô màu nhóm đã chọn
     for g_idx, grp in enumerate(selected_groups):
         color = colors[g_idx % len(colors)]
         covered = set(grp['covers'])
@@ -231,41 +162,26 @@ def draw_kmap(num_vars, minterms, dont_cares, selected_groups, colors):
     plt.tight_layout()
     return fig
 
-
 # ---------------- Streamlit UI ----------------
 st.set_page_config(layout="wide")
-st.title("K-map Minimizer — QM + Petrick (hiển thị chi tiết nhóm)")
+st.title("K-map Minimizer — QM + Petrick (đúng mapping & hiển thị X)")
 
-# Sidebar inputs
 num_vars = st.sidebar.slider("Số biến", 2, 6, 4)
 minterms_input = st.sidebar.text_input("Minterms (cách nhau bằng dấu ,)", "1,3,7,11,15")
 dont_cares_input = st.sidebar.text_input("Don't care terms", "2,5,6,9,10")
 
-# parse inputs
 def parse_list(s):
-    items = []
-    for v in s.split(","):
-        v = v.strip()
-        if v == "":
-            continue
-        try:
-            items.append(int(v))
-        except:
-            st.error(f"Không thể parse số: {v}")
-            st.stop()
-    return items
+    return [int(x.strip()) for x in s.split(",") if x.strip()]
 
 minterms = parse_list(minterms_input)
 dont_cares = parse_list(dont_cares_input)
 
-# validate range and overlap
 max_val = (1 << num_vars) - 1
 for v in minterms + dont_cares:
     if v < 0 or v > max_val:
-        st.error(f"Các giá trị phải nằm trong [0, {max_val}] cho {num_vars} biến. Giá trị {v} không hợp lệ.")
+        st.error(f"Giá trị {v} không hợp lệ cho {num_vars} biến.")
         st.stop()
 
-# remove any dont_cares that are actually minterms
 dont_cares = [d for d in dont_cares if d not in minterms]
 
 if st.button("Tối giản và Vẽ K-map"):
@@ -275,74 +191,44 @@ if st.button("Tối giản và Vẽ K-map"):
     c2.write("**Minterms**"); c2.write(minterms if minterms else "—")
     c3.write("**Don't cares**"); c3.write(dont_cares if dont_cares else "—")
 
-    # run solver
-    res = solve_minimization(minterms, dont_cares, num_vars)
-    prime_info = res['prime_info']
-    selected_idx = res['selected_idx']
-    final_exprs = res['final_exprs']
-    essential_idx = res['essential_idx']
-    chart = res['chart']
+    prime_info, selected_idx, final_exprs, essential_idx = solve_minimization(minterms, dont_cares, num_vars)
 
     colors = ['#ffcccc', '#ccffcc', '#ccccff', '#ffffcc', '#ccffff', '#ffccff',
               '#ffd9b3', '#e6ccff', '#d9ffcc', '#ffb3b3']
 
     st.subheader("Prime implicants (tất cả)")
-    if not prime_info:
-        st.write("Không có prime implicant (có thể input rỗng).")
-    else:
-        # table-like display
-        for idx, p in enumerate(prime_info):
-            marker = ""
-            if idx in essential_idx:
-                marker = " (essential)"
-            st.markdown(
-                f"<div style='padding:6px;border-radius:6px;background:#f7f7f7;margin-bottom:4px;'>"
-                f"<b>Index {idx}</b>{marker} &nbsp;|&nbsp; Mask: <code>{p['mask']}</code> &nbsp;|&nbsp; Covers: <code>{sorted(p['covers'])}</code> &nbsp;|&nbsp; Literals: {p['literals']}"
-                f"</div>",
-                unsafe_allow_html=True
-            )
+    for idx, p in enumerate(prime_info):
+        marker = " (essential)" if idx in essential_idx else ""
+        st.markdown(
+            f"<div style='padding:6px;border-radius:6px;background:#f7f7f7;margin-bottom:4px;'>"
+            f"<b>Index {idx}</b>{marker} &nbsp;|&nbsp; Mask: <code>{p['mask']}</code> "
+            f"&nbsp;|&nbsp; Covers: <code>{sorted(p['covers'])}</code> "
+            f"&nbsp;|&nbsp; Literals: {p['literals']}</div>",
+            unsafe_allow_html=True
+        )
 
-    # show prime implicant chart
-    st.subheader("Prime implicant chart (minterm -> prime indices)")
-    if chart:
-        for m, covers in sorted(chart.items()):
-            st.write(f"{m} -> {covers}")
-    else:
-        st.write("—")
-
-    # show selected implicants
-    st.subheader("Implicants được chọn (cuối cùng)")
+    st.subheader("Implicants được chọn")
     if not final_exprs:
-        st.info("Không có implicant được chọn (hàm có thể là 0).")
+        st.info("Không có implicant được chọn.")
     else:
-        # display in color blocks in order of selected_idx (consistent ordering)
-        sel_list = sorted(list(selected_idx))
         selected_groups = []
-        for order, idx in enumerate(sel_list):
-            p = prime_info[idx]
-            block = {'mask': p['mask'], 'covers': sorted(p['covers']), 'expr': mask_to_expr(p['mask']), 'idx': idx}
+        for order, block in enumerate(final_exprs):
             selected_groups.append(block)
             color = colors[order % len(colors)]
-            essential_mark = " (essential)" if idx in essential_idx else ""
+            essential_mark = " (essential)" if block['idx'] in essential_idx else ""
             st.markdown(
                 f"<div style='background-color:{color};padding:8px;border-radius:6px;margin-bottom:6px;'>"
-                f"<b>Selected {order+1} (prime idx {idx}){essential_mark}:</b> &nbsp; Mask: <code>{p['mask']}</code> &nbsp;|&nbsp; Covers: <code>{sorted(p['covers'])}</code> &nbsp;|&nbsp; Expr: <b>{mask_to_expr(p['mask'])}</b>"
-                f"</div>",
+                f"<b>Selected {order+1}{essential_mark}:</b> Mask: <code>{block['mask']}</code> "
+                f"| Covers: <code>{block['covers']}</code> "
+                f"| Expr: <b>{block['expr']}</b></div>",
                 unsafe_allow_html=True
             )
 
-        # final SOP (LaTeX)
-        st.subheader("Biểu thức tối giản (SOP) - kết quả cuối")
+        st.subheader("Biểu thức tối giản (SOP)")
         exprs = [block['expr'] for block in selected_groups]
-        # convert A' to A^{\prime} for LaTeX
         latex_exprs = [re.sub(r"([A-Z])'", r"\1^{\\prime}", e) for e in exprs]
-        if latex_exprs:
-            st.latex(" + ".join(latex_exprs))
-        else:
-            st.write("0 (hàm luôn bằng 0)")
+        st.latex(" + ".join(latex_exprs))
 
-        # draw K-map using selected groups
-        st.subheader("K-map (ô có '1' là minterms; màu = implicant đã chọn)")
-        fig = draw_kmap(num_vars, minterms, selected_groups, colors)
+        st.subheader("K-map (1 = minterm, X = don't care)")
+        fig = draw_kmap(num_vars, minterms, dont_cares, selected_groups, colors)
         st.pyplot(fig)
-
