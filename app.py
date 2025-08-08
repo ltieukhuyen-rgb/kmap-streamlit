@@ -1,62 +1,31 @@
 import streamlit as st
 import matplotlib.pyplot as plt
-import re
 
 # ====== Hàm hỗ trợ ======
 def gray_code(n):
     return n ^ (n >> 1)
 
 def num_to_binary_list(num, bits):
-    """Trả về list bit (int) từ MSB -> LSB"""
     return [(num >> i) & 1 for i in reversed(range(bits))]
 
 def term_to_mask(group, num_vars):
-    """
-    group: tuple hoặc list chứa minterm numbers (có thể nested)
-    Trả về list các ký tự '0','1','-'
-    """
-    # Flatten group về list số nguyên
-    flat_nums = []
-    for item in group:
-        if isinstance(item, (list, tuple, set)):
-            flat_nums.extend(list(item))
-        else:
-            flat_nums.append(item)
-    nums = sorted(set(int(x) for x in flat_nums))
-
-    # bắt đầu từ số đầu tiên, chuyển thành chuỗi '0'/'1'
-    bits = [str(b) for b in num_to_binary_list(nums[0], num_vars)]
-    for other in nums[1:]:
-        bits2 = [str(b) for b in num_to_binary_list(other, num_vars)]
+    bits = num_to_binary_list(list(group)[0], num_vars)
+    for other in group[1:]:
+        bits2 = num_to_binary_list(other, num_vars)
         bits = ['-' if b1 != b2 else b1 for b1, b2 in zip(bits, bits2)]
     return bits
 
-
 def term_to_expression(bits):
-    """
-    bits: list của '0','1','-'
-    Trả về chuỗi biểu thức dạng AB'C...
-    """
-    variables = [chr(ord('A') + i) for i in range(len(bits))]
+    variables = [chr(ord('A')+i) for i in range(len(bits))]
     expr_parts = []
     for bit, var in zip(bits, variables):
         if bit == '1':
             expr_parts.append(var)
         elif bit == '0':
-            expr_parts.append(var + "'")
-        # '-' bỏ qua
+            expr_parts.append(f"{var}'")
     return ''.join(expr_parts) if expr_parts else '1'
 
-def expr_list_to_latex(expr_list):
-    """
-    Chuyển list các biểu thức (ví dụ ["A B'","C'D"]) sang LaTeX:
-    - Thay X' -> X^{\\prime}
-    - Nối bằng dấu +
-    """
-    latex_terms = [re.sub(r"([A-Z])'", r"\1^{\\prime}", term) for term in expr_list]
-    return " + ".join(latex_terms)
-
-# ====== Quine–McCluskey tối giản (đơn giản, trả về essential implicants) ======
+# ====== Quine–McCluskey tối giản ======
 def qm_minimize(minterms, dont_cares, num_vars):
     terms = sorted(set(minterms) | set(dont_cares))
     groups = {}
@@ -71,8 +40,7 @@ def qm_minimize(minterms, dont_cares, num_vars):
         marked = set()
         all_group_keys = sorted(groups.keys())
         for i in range(len(all_group_keys) - 1):
-            g1 = groups[all_group_keys[i]]
-            g2 = groups[all_group_keys[i + 1]]
+            g1, g2 = groups[all_group_keys[i]], groups[all_group_keys[i+1]]
             for term1 in g1:
                 for term2 in g2:
                     diff = term1[0] ^ term2[0]
@@ -87,32 +55,28 @@ def qm_minimize(minterms, dont_cares, num_vars):
                     prime_implicants.add(term)
         groups = new_groups
 
-    # tìm essential implicants (rất cơ bản)
-    essential = []
+    essential = set()
     for m in minterms:
         covers = [pi for pi in prime_implicants if m in pi]
         if len(covers) == 1:
-            essential.append(covers[0])
-
-    # Nếu không có essential nào (hoặc thiếu che phủ), trả về prime_implicants để người dùng thấy
-    if not essential and prime_implicants:
-        return list(sorted(prime_implicants))
-    return list(sorted(essential))
+            essential.add(covers[0])
+    return list(essential)
 
 # ====== Vẽ K-map ======
 def draw_kmap(num_vars, minterms, groups, colors):
-    """
-    groups: list of iterables (groups), enumerate sẽ bắt đầu từ 0 -> color index tương ứng
-    """
-    rows = 1 << (num_vars // 2)
-    cols = 1 << (num_vars - num_vars // 2)
+    if num_vars <= 3:
+        rows = 1 << (num_vars // 2)
+        cols = 1 << (num_vars - num_vars // 2)
+    else:
+        rows = 1 << (num_vars // 2)
+        cols = 1 << (num_vars - num_vars // 2)
 
-    fig, ax = plt.subplots(figsize=(cols * 0.6, rows * 0.6))
-    ax.set_xticks(range(cols + 1))
-    ax.set_yticks(range(rows + 1))
+    fig, ax = plt.subplots()
+    ax.set_xticks(range(cols+1))
+    ax.set_yticks(range(rows+1))
     ax.set_xticklabels([])
     ax.set_yticklabels([])
-    ax.grid(True, linewidth=0.6)
+    ax.grid(True)
 
     cell_map = {}
     for r in range(rows):
@@ -122,24 +86,69 @@ def draw_kmap(num_vars, minterms, groups, colors):
             val = (row_gray << (num_vars - num_vars // 2)) | col_gray
             cell_map[(r, c)] = val
             if val in minterms:
-                ax.text(c + 0.5, r + 0.5, '1', va='center', ha='center', fontsize=12)
+                ax.text(c+0.5, r+0.5, '1', va='center', ha='center', fontsize=14)
 
-    # Tô màu nhóm (mỗi ô nếu thuộc nhóm sẽ được tô)
     for g_idx, group in enumerate(groups):
         color = colors[g_idx % len(colors)]
         for cell, val in cell_map.items():
             if val in group:
-                ax.add_patch(plt.Rectangle((cell[1], cell[0]), 1, 1, color=color, alpha=0.35, linewidth=0))
+                ax.add_patch(plt.Rectangle((cell[1], cell[0]), 1, 1, color=color, alpha=0.3))
 
     ax.invert_yaxis()
-    ax.set_aspect('equal')
-    plt.tight_layout()
     return fig
 
-# ============================ Streamlit UI ============================
-st.set_page_config(layout="wide")
-st.title("K-map Minimizer 2–6 biến (sửa lỗi & hiển thị chi tiết nhóm)")
+# ============================ Streamlit ============================
+st.title("K-map Minimizer 2–6 biến")
 
-# Input
-num
+num_vars = st.slider("Số biến", 2, 6, 3)
+minterms_input = st.text_input("Minterms (cách nhau bằng dấu ,)", "1,3,7")
+dont_cares_input = st.text_input("Don't care terms", "")
 
+try:
+    minterms = [int(x) for x in minterms_input.split(",") if x.strip() != ""]
+    dont_cares = [int(x) for x in dont_cares_input.split(",") if x.strip() != ""]
+except:
+    st.error("Nhập sai định dạng!")
+    st.stop()
+
+if st.button("Tối giản và Vẽ K-map"):
+    # Hiển thị dữ liệu đầu vào
+    st.subheader("Dữ liệu đầu vào")
+    st.write(f"Số biến: **{num_vars}**")
+    st.write(f"Minterms: {minterms}")
+    st.write(f"Don't cares: {dont_cares}")
+
+    # Tối giản
+    groups = qm_minimize(minterms, dont_cares, num_vars)
+
+    # Màu cho nhóm
+    colors = ['#ffcccc','#ccffcc','#ccccff','#ffffcc','#ccffff','#ffccff']
+
+    # Hiển thị nhóm
+    st.subheader("Các nhóm tối giản")
+    expr_list = []
+    for idx, g in enumerate(groups, 1):
+        mask = term_to_mask(g, num_vars)
+        mask_str = ''.join(mask)
+        expr = term_to_expression(mask)
+        expr_list.append(expr)
+
+        st.markdown(
+            f"<div style='background-color:{colors[idx % len(colors)]};padding:5px;'>"
+            f"<b>Nhóm {idx}:</b> {sorted(g)} "
+            f"| Mask: <code>{mask_str}</code> "
+            f"| Biểu thức: <b>{expr}</b>"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+
+    # Hiển thị biểu thức tối giản dạng SOP
+    if expr_list:
+        st.subheader("Biểu thức tối giản (SOP)")
+        sop_str = " + ".join(expr_list)
+        st.latex(sop_str)
+
+    # Vẽ K-map
+    st.subheader("K-map")
+    fig = draw_kmap(num_vars, minterms, groups, colors)
+    st.pyplot(fig)
