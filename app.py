@@ -125,18 +125,22 @@ if st.button("Tối giản và Vẽ K-map"):
     colors = ['#ffcccc','#ccffcc','#ccccff','#ffffcc','#ccffff','#ffccff']
 
     # Hiển thị nhóm
-    st.subheader("Các nhóm tối giản")
-    for idx, g in enumerate(groups, 1):
-        mask = term_to_mask(g, num_vars)
-        expr = term_to_expression(mask)
-        st.markdown(
-            f"<div style='background-color:{colors[idx%len(colors)]};padding:5px;'>"
-            f"**Nhóm {idx}:** {sorted(g)} | Mask: {''.join(mask)} | Biểu thức: {expr}"
-            f"</div>",
-            unsafe_allow_html=True
-        )
+    # Hiển thị nhóm
+st.subheader("Các nhóm tối giản")
+for idx, g in enumerate(groups, 1):
+    mask = term_to_mask(g, num_vars)
+    mask_str = ''.join(mask)
+    expr = term_to_expression(mask)
+    st.markdown(
+        f"<div style='background-color:{colors[idx%len(colors)]};padding:5px;'>"
+        f"<b>Nhóm {idx}:</b> {sorted(g)} | Mask: {mask_str} | Biểu thức: {expr}"
+        f"</div>",
+        unsafe_allow_html=True
+    )
+
 
     # Vẽ K-map
     st.subheader("K-map")
     fig = draw_kmap(num_vars, minterms, groups, colors)
     st.pyplot(fig)
+
