@@ -107,7 +107,7 @@ def solve_minimization(minterms, dont_cares, num_vars):
                    for idx in sorted(selected_idx)]
     return prime_info, selected_idx, final_exprs, essential_idx
 
-# ---------- Draw K-map ----------
+# ---------- Draw K-map (AB = cột, CD = hàng) ----------
 def draw_kmap(num_vars, minterms, dont_cares, selected_groups, colors):
     rows = 1 << (num_vars // 2)   # CD = hàng
     cols = 1 << (num_vars - num_vars // 2)  # AB = cột
@@ -132,7 +132,7 @@ def draw_kmap(num_vars, minterms, dont_cares, selected_groups, colors):
     for r in range(rows):
         ax.text(-0.3, r+0.5, row_labels[r], ha='center', va='center', fontsize=10, fontweight='bold')
 
-    # Fill cells
+    # Fill cells with minterm index and value (1/X)
     cell_map = {}
     for r in range(rows):
         for c in range(cols):
@@ -140,13 +140,13 @@ def draw_kmap(num_vars, minterms, dont_cares, selected_groups, colors):
             row_bits = row_gray_list[r]
             val = (col_bits << (num_vars // 2)) | row_bits  # AB = cột, CD = hàng
             cell_map[(r, c)] = val
-            ax.text(c+0.05, r+0.15, str(val), ha='left', va='top', fontsize=8)  # minterm
+            ax.text(c+0.05, r+0.15, str(val), ha='left', va='top', fontsize=8)  # minterm number
             if val in minterms:
                 ax.text(c+0.5, r+0.5, '1', ha='center', va='center', fontsize=14)
             elif val in dont_cares:
                 ax.text(c+0.5, r+0.5, 'X', ha='center', va='center', fontsize=14, color='blue')
 
-    # Draw group borders
+    # Draw group borders (bo tròn nhẹ)
     for g_idx, grp in enumerate(selected_groups):
         color = colors[g_idx % len(colors)]
         covered = set(grp['covers'])
@@ -164,13 +164,15 @@ def draw_kmap(num_vars, minterms, dont_cares, selected_groups, colors):
 
 # ---------- Streamlit UI ----------
 st.set_page_config(layout="wide")
-st.title("K-map Minimizer — QM + Petrick (AB = cột, CD = hàng)")
+st.title("K-map Minimizer — (giao diện rút gọn)")
 
 num_vars = st.sidebar.slider("Số biến", 2, 6, 4)
 minterms_input = st.sidebar.text_input("Minterms", "1,3,7,11,15")
 dont_cares_input = st.sidebar.text_input("Don't care", "2,5,6,9,10")
 
 def parse_list(s):
+    if not s or s.strip() == "":
+        return []
     return [int(x.strip()) for x in s.split(",") if x.strip()]
 
 minterms = parse_list(minterms_input)
@@ -179,9 +181,10 @@ dont_cares = parse_list(dont_cares_input)
 max_val = (1 << num_vars) - 1
 for v in minterms + dont_cares:
     if v < 0 or v > max_val:
-        st.error(f"Giá trị {v} không hợp lệ.")
+        st.error(f"Giá trị {v} không hợp lệ cho {num_vars} biến (phải trong [0, {max_val}]).")
         st.stop()
 
+# loại bỏ don't care trùng minterm
 dont_cares = [d for d in dont_cares if d not in minterms]
 
 if st.button("Tối giản và Vẽ K-map"):
@@ -195,27 +198,16 @@ if st.button("Tối giản và Vẽ K-map"):
 
     colors = ['#ff0000', '#00aa00', '#0000ff', '#ff9900', '#9900cc', '#00cccc']
 
-    st.subheader("Prime implicants")
-    for idx, p in enumerate(prime_info):
-        marker = " (essential)" if idx in essential_idx else ""
-        st.markdown(f"<b>{idx}</b>{marker} | Mask: <code>{p['mask']}</code> | Covers: {sorted(p['covers'])}", unsafe_allow_html=True)
-
-    st.subheader("Implicants được chọn")
+    # --- Chỉ hiển thị Biểu thức SOP và K-map (lược bỏ Prime implicants và chi tiết nhóm) ---
     if not final_exprs:
-        st.info("Không có implicant.")
+        st.info("Không có implicant được chọn — hàm có thể là 0.")
     else:
-        selected_groups = []
-        for order, block in enumerate(final_exprs):
-            selected_groups.append(block)
-            color = colors[order % len(colors)]
-            essential_mark = " (essential)" if block['idx'] in essential_idx else ""
-            st.markdown(f"<div style='color:{color}'><b>Nhóm {order+1}{essential_mark}:</b> Mask: {block['mask']} | Covers: {block['covers']} | Expr: <b>{block['expr']}</b></div>", unsafe_allow_html=True)
-
         st.subheader("Biểu thức tối giản (SOP)")
-        exprs = [block['expr'] for block in selected_groups]
+        exprs = [block['expr'] for block in final_exprs]
         latex_exprs = [re.sub(r"([A-Z])'", r"\1^{\\prime}", e) for e in exprs]
         st.latex(" + ".join(latex_exprs))
 
         st.subheader("K-map")
-        fig = draw_kmap(num_vars, minterms, dont_cares, selected_groups, colors)
+        # dùng final_exprs làm selected_groups để vẽ
+        fig = draw_kmap(num_vars, minterms, dont_cares, final_exprs, colors)
         st.pyplot(fig)
