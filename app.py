@@ -12,17 +12,25 @@ def num_to_binary_list(num, bits):
 
 def term_to_mask(group, num_vars):
     """
-    group: tuple hoặc iterable các minterm số (ints).
-    Trả về list các ký tự '0','1','-' (chuỗi) biểu diễn mask.
+    group: tuple hoặc list chứa minterm numbers (có thể nested)
+    Trả về list các ký tự '0','1','-'
     """
-    nums = sorted(list(group))
+    # Flatten group về list số nguyên
+    flat_nums = []
+    for item in group:
+        if isinstance(item, (list, tuple, set)):
+            flat_nums.extend(list(item))
+        else:
+            flat_nums.append(item)
+    nums = sorted(set(int(x) for x in flat_nums))
+
     # bắt đầu từ số đầu tiên, chuyển thành chuỗi '0'/'1'
     bits = [str(b) for b in num_to_binary_list(nums[0], num_vars)]
     for other in nums[1:]:
         bits2 = [str(b) for b in num_to_binary_list(other, num_vars)]
-        # giữ '-' nếu khác, ngược lại giữ ký tự '0' hoặc '1'
         bits = ['-' if b1 != b2 else b1 for b1, b2 in zip(bits, bits2)]
     return bits
+
 
 def term_to_expression(bits):
     """
@@ -134,3 +142,4 @@ st.title("K-map Minimizer 2–6 biến (sửa lỗi & hiển thị chi tiết nh
 
 # Input
 num
+
